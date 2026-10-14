@@ -1,0 +1,24 @@
+[package]
+name = "danfe"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+description = "DANFE (NF-e) e DANFE NFC-e em PDF a partir do XML autorizado"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/juniortada/rust_danfe"
+readme = "README.md"
+keywords = ["danfe", "nfe", "nfce", "sefaz", "pdf"]
+categories = ["text-processing"]
+include = ["src/**", "templates/**", "fonts/**", "examples/**", "README.md", "CHANGELOG.md", "LICENSE-*"]
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+roxmltree = { version = "0.20" }
+rust_decimal = { version = "1.36" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+thiserror = { version = "2" }
+typst = { version = "0.15" }
+typst-layout = { version = "0.15" }
+typst-pdf = { version = "0.15" }
