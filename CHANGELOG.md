@@ -1,6 +1,6 @@
 # Changelog
 
-## [Não publicado]
+## [0.1.0] - 2026-10-14
 
 - Leitura do XML e geração do DANFE da NF-e (A4 retrato) e do DANFE NFC-e (bobina 80 mm), extraídas do backend do
   Falcão ERP.
