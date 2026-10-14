@@ -24,7 +24,7 @@ pub use model::{
     Payment, Recipient, ReformTotals, Totals, Transport, Vehicle, Volume,
 };
 
-const NFE_A4_PORTRAIT: &str = include_str!("../templates/nfe_a4_portrait.typ");
+const NFE_A4: &str = include_str!("../templates/nfe_a4.typ");
 const NFCE: &str = include_str!("../templates/nfce.typ");
 
 /// Paper and orientation.
@@ -88,8 +88,46 @@ struct Page<'a> {
     #[serde(flatten)]
     invoice: &'a Invoice,
     paper: &'static str,
+    /// DANFE Simplificado Tipo 2 (`tpImp=6`).
+    simplified: bool,
     logo: Option<&'static str>,
     establishment_copy: bool,
+}
+
+/// Which auxiliary document the XML calls for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Document {
+    /// NF-e, `tpImp` 1 or 2 (MOC 7.0 Anexo II).
+    Danfe,
+    /// NF-e, `tpImp` 6 (NT 2026.003).
+    SimplifiedType2,
+    /// NFC-e (Manual DANFE NFC-e v6.0).
+    DanfeNfce,
+}
+
+impl Document {
+    fn of(invoice: &Invoice) -> Result<Self, Error> {
+        match (invoice.model.as_str(), invoice.print_format.as_str()) {
+            ("65", _) => Ok(Self::DanfeNfce),
+            ("55", "6") => Ok(Self::SimplifiedType2),
+            ("55", "0") => Err(Error::UnsupportedDocument(
+                "NF-e sem geração de DANFE (tpImp=0)".to_string(),
+            )),
+            ("55", "3") => Err(Error::UnsupportedDocument(
+                "DANFE Simplificado (tpImp=3)".to_string(),
+            )),
+            ("55", _) => Ok(Self::Danfe),
+            (model, _) => Err(Error::UnsupportedDocument(format!("modelo {model}"))),
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Danfe => "DANFE",
+            Self::SimplifiedType2 => "DANFE Simplificado Tipo 2",
+            Self::DanfeNfce => "DANFE NFC-e",
+        }
+    }
 }
 
 /// What the DANFE prints, without rendering it.
@@ -100,13 +138,18 @@ pub fn parse(xml: &str) -> Result<Invoice, Error> {
     xml::parse(xml)
 }
 
-/// The layout a document prints in when nobody chooses one.
-fn default_layout(invoice: &Invoice) -> Layout {
-    if invoice.model == "65" {
-        Layout::Roll80mm
-    } else {
-        Layout::A4Portrait
-    }
+/// The layout a document prints in when nobody chooses one, from its
+/// `tpImp`: A4 portrait or landscape for the DANFE, the 80 mm roll for the
+/// DANFE NFC-e and the DANFE Simplificado Tipo 2.
+///
+/// # Errors
+/// [`Error::UnsupportedDocument`] for a document without a DANFE here.
+pub fn default_layout(invoice: &Invoice) -> Result<Layout, Error> {
+    Ok(match Document::of(invoice)? {
+        Document::Danfe if invoice.print_format == "2" => Layout::A4Landscape,
+        Document::Danfe => Layout::A4Portrait,
+        Document::SimplifiedType2 | Document::DanfeNfce => Layout::Roll80mm,
+    })
 }
 
 /// The PDF in the layout the document calls for.
@@ -115,7 +158,7 @@ fn default_layout(invoice: &Invoice) -> Layout {
 /// See [`Error`].
 pub fn render_default(xml: &str) -> Result<Vec<u8>, Error> {
     let invoice = parse(xml)?;
-    let layout = default_layout(&invoice);
+    let layout = default_layout(&invoice)?;
     render_invoice(&invoice, layout, &Options::default())
 }
 
@@ -173,37 +216,33 @@ fn lay_out(
     layout: Layout,
     options: &Options,
 ) -> Result<typst_layout::PagedDocument, Error> {
-    let (template, paper, image) = match (invoice.model.as_str(), layout) {
-        ("55", Layout::A4Portrait) => {
-            let modules = barcode::code128_modules(&invoice.key)
-                .ok_or_else(|| Error::InvalidXml("chave de acesso inválida".to_string()))?;
-            (
-                NFE_A4_PORTRAIT,
-                "a4",
-                ("/chave.svg".to_string(), barcode::svg(&modules, 50)),
-            )
-        }
-        ("65", Layout::Roll80mm) => {
-            let qr = invoice
-                .qrcode
-                .as_deref()
-                .and_then(render::qr_svg)
-                .ok_or_else(|| Error::InvalidXml("NFC-e sem QR code".to_string()))?;
-            (NFCE, "80mm", ("/qrcode.svg".to_string(), qr))
-        }
-        ("65", _) => {
+    let document = Document::of(invoice)?;
+    let paper = match (document, layout) {
+        (_, Layout::A4Portrait) => "a4",
+        (Document::Danfe, Layout::A4Landscape) => "a4_landscape",
+        (Document::SimplifiedType2 | Document::DanfeNfce, Layout::Roll80mm) => "80mm",
+        (Document::SimplifiedType2 | Document::DanfeNfce, Layout::Roll58mm) => "58mm",
+        _ => {
             return Err(Error::UnsupportedLayout {
-                document: "DANFE NFC-e",
+                document: document.name(),
                 layout,
             })
         }
-        ("55", _) => {
-            return Err(Error::UnsupportedLayout {
-                document: "DANFE",
-                layout,
-            })
-        }
-        (model, _) => return Err(Error::UnsupportedDocument(format!("modelo {model}"))),
+    };
+    let (template, image) = if document == Document::Danfe {
+        let modules = barcode::code128_modules(&invoice.key)
+            .ok_or_else(|| Error::InvalidXml("chave de acesso inválida".to_string()))?;
+        (
+            NFE_A4,
+            ("/chave.svg".to_string(), barcode::svg(&modules, 50)),
+        )
+    } else {
+        let qr = invoice
+            .qrcode
+            .as_deref()
+            .and_then(render::qr_svg)
+            .ok_or_else(|| Error::InvalidXml(format!("{} sem QR code", document.name())))?;
+        (NFCE, ("/qrcode.svg".to_string(), qr))
     };
     let mut files = vec![image];
     let logo = match &options.logo {
@@ -217,6 +256,7 @@ fn lay_out(
     let page = Page {
         invoice,
         paper,
+        simplified: document == Document::SimplifiedType2,
         logo,
         establishment_copy: options.establishment_copy,
     };

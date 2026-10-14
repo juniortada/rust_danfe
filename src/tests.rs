@@ -179,6 +179,69 @@ fn pages_have_the_size_of_their_layout() {
     assert_eq!(roll.pages().len(), 1);
 }
 
+/// The reform NF-e printed as DANFE Simplificado Tipo 2, with its QR code.
+fn simplified_type_2() -> String {
+    REFORM
+        .replacen("<tpImp>1</tpImp>", "<tpImp>6</tpImp>", 1)
+        .replacen(
+            "</infNFe>",
+            "</infNFe><infNFeSupl><qrCode>https://www.homologacao.nfce.fazenda.sp.gov.br/qrcode?p=35261211222333000181550010000012341624557528|3|2</qrCode><urlChave>https://www.homologacao.nfce.fazenda.sp.gov.br/consulta</urlChave></infNFeSupl>",
+            1,
+        )
+}
+
+#[test]
+fn every_document_prints_in_the_layouts_its_norm_allows() {
+    let landscape = document(REFORM, Layout::A4Landscape);
+    let size = landscape.pages()[0].frame.size();
+    assert!((size.x.to_mm() - 297.0).abs() < 0.5 && (size.y.to_mm() - 210.0).abs() < 0.5);
+    let narrow = document(NFCE, Layout::Roll58mm);
+    assert!((narrow.pages()[0].frame.width().to_mm() - 58.0).abs() < 0.5);
+    let nfce_a4 = document(NFCE, Layout::A4Portrait);
+    assert!((nfce_a4.pages()[0].frame.width().to_mm() - 210.0).abs() < 0.5);
+
+    let simplified = simplified_type_2();
+    for layout in [Layout::Roll80mm, Layout::Roll58mm, Layout::A4Portrait] {
+        assert!(render(&simplified, layout).unwrap().starts_with(b"%PDF"));
+    }
+    assert_eq!(
+        parse(&simplified).unwrap().reform.ibs.as_deref(),
+        Some("0,03")
+    );
+    assert!(matches!(
+        render(&simplified, Layout::A4Landscape),
+        Err(Error::UnsupportedLayout {
+            document: "DANFE Simplificado Tipo 2",
+            ..
+        })
+    ));
+    assert!(matches!(
+        render(NFCE, Layout::A4Landscape),
+        Err(Error::UnsupportedLayout {
+            document: "DANFE NFC-e",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn the_print_format_picks_the_default_layout() {
+    let landscape = parse(&REFORM.replacen("<tpImp>1</tpImp>", "<tpImp>2</tpImp>", 1)).unwrap();
+    assert_eq!(default_layout(&landscape), Ok(Layout::A4Landscape));
+    assert_eq!(
+        default_layout(&parse(REFORM).unwrap()),
+        Ok(Layout::A4Portrait)
+    );
+    assert_eq!(default_layout(&parse(NFCE).unwrap()), Ok(Layout::Roll80mm));
+    let simplified = parse(&simplified_type_2()).unwrap();
+    assert_eq!(default_layout(&simplified), Ok(Layout::Roll80mm));
+    let label = REFORM.replacen("<tpImp>1</tpImp>", "<tpImp>3</tpImp>", 1);
+    assert!(matches!(
+        render_default(&label),
+        Err(Error::UnsupportedDocument(_))
+    ));
+}
+
 #[test]
 fn a_long_invoice_continues_on_more_sheets() {
     let document = document(&with_items(70), Layout::A4Portrait);
@@ -259,6 +322,9 @@ fn refuses_what_is_not_printable() {
     assert_eq!(parse(&without_protocol), Err(Error::NotAuthorized));
     assert!(matches!(
         render(NFE, Layout::Roll80mm),
-        Err(Error::UnsupportedLayout { .. })
+        Err(Error::UnsupportedLayout {
+            document: "DANFE",
+            ..
+        })
     ));
 }

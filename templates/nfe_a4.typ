@@ -1,12 +1,15 @@
-// DANFE da NF-e, A4 retrato: MOC 7.0 Anexo II (Anexo III.02) com o leiaute da NT 2026.010.
+// DANFE da NF-e em A4: MOC 7.0 Anexo II (retrato: Anexo III.02; paisagem: Anexo III.04) com o leiaute da NT 2026.010.
 #let data = json("data.json")
 #let e = data.emitter
 #let serif = ("Times New Roman", "Liberation Serif")
 
 // Anexo II §3.6.2: margens de 0,2 a 0,8 cm.
 #let margin = 5mm
+#let landscape = data.paper == "a4_landscape"
 #let header-height = if data.key_alphanumeric { 67mm } else { 54mm }
-#let footer-height = 21mm
+// Retrato: canhoto no rodapé da 1ª folha (§3.3.1). Paisagem: faixa vertical à esquerda (Anexo III.04).
+#let footer-height = if landscape { 0mm } else { 21mm }
+#let strip-width = if landscape { 22mm } else { 0mm }
 
 #let shown(value) = if value == none { "" } else { value }
 // §3.7.1: descritivo dos blocos, negrito, caixa alta, ≥ 5 pt.
@@ -116,9 +119,23 @@
   )
 }
 
+#let vertical-receipt = rotate(-90deg, reflow: true, block(width: 210mm - 2 * margin, table(
+  columns: (1fr, 42mm), rows: strip-width - 3mm, inset: 0pt,
+  {
+    block(inset: (x: 2pt, y: 2pt), text(size: 6pt)[RECEBEMOS DE #upper(shown(e.name)) OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO])
+    table(columns: (45mm, 1fr), inset: 0pt, stroke: (top: 0.5pt, rest: none),
+      table.vline(x: 1, stroke: 0.5pt),
+      field("Data de recebimento", none),
+      field("Identificação e assinatura do recebedor", none),
+    )
+  },
+  align(center + horizon, text(size: 10pt, weight: "bold")[NF-e \ Nº #data.number_dotted \ SÉRIE #data.series]),
+)))
+
 #set page(
   paper: "a4",
-  margin: (left: margin, right: margin, top: margin + header-height, bottom: margin + footer-height),
+  flipped: landscape,
+  margin: (left: margin + strip-width, right: margin, top: margin + header-height, bottom: margin + footer-height),
   header-ascent: 0pt,
   footer-descent: 0pt,
   header: context {
@@ -127,9 +144,16 @@
     block(height: header-height, align(bottom, identification(page-number, pages)))
   },
   footer: context {
-    if counter(page).get().first() == 1 { block(height: footer-height, align(bottom, receipt)) }
+    if not landscape and counter(page).get().first() == 1 {
+      block(height: footer-height, align(bottom, receipt))
+    }
   },
-  background: watermark,
+  background: {
+    watermark
+    context if landscape and counter(page).get().first() == 1 {
+      place(top + left, dx: margin, dy: margin, vertical-receipt)
+    }
+  },
 )
 
 // NT 2026.010 §4.2: CRT e área reservada ao tipo de regime de apuração do IBS e da CBS.

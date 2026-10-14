@@ -223,6 +223,7 @@ fn reform(total: Option<Node<'_, '_>>) -> ReformTotals {
     let mono = ibs_cbs.and_then(|totals| totals.child("gMono"));
     ReformTotals {
         cbs: optional_money(ibs_cbs.and_then(|totals| totals.child("gCBS")), "vCBS"),
+        ibs: optional_money(ibs_cbs.and_then(|totals| totals.child("gIBS")), "vIBS"),
         ibs_state: optional_money(
             ibs_cbs.and_then(|totals| totals.path(&["gIBS", "gIBSUF"])),
             "vIBSUF",

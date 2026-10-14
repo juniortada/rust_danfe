@@ -177,6 +177,9 @@ pub struct Totals {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReformTotals {
     pub cbs: Option<String>,
+    /// IBS of the state and of the city (`vIBS`), as the DANFE Simplificado
+    /// Tipo 2 prints it (NT 2026.003 §3.1.4).
+    pub ibs: Option<String>,
     pub ibs_state: Option<String>,
     pub ibs_city: Option<String>,
     pub selective: Option<String>,

@@ -1,20 +1,26 @@
-// DANFE NFC-e: Manual de Especificações Técnicas do DANFE NFC-e e QR Code, versão 6.0.
+// DANFE NFC-e (Manual de Especificações Técnicas do DANFE NFC-e e QR Code, versão 6.0) e
+// DANFE Simplificado Tipo 2 da NF-e com tpImp=6 (NT 2026.003), que segue o mesmo leiaute.
 #let data = json("data.json")
 #let e = data.emitter
 #let narrow = data.paper == "58mm"
+#let a4 = data.paper == "a4"
+#let simplified = data.simplified
 #let mono = ("Courier New", "Liberation Mono")
 #let shown(value) = if value == none { "" } else { value }
 
 // Manual §3.1.8 e MOC 7.0 Anexo II §3: em homologação, "SEM VALOR FISCAL" também em marca d'água.
 #let watermark = if data.homologation {
-  rotate(-60deg, align(center, text(fill: rgb(200, 0, 0, 45), weight: "bold", size: if narrow { 16pt } else { 22pt })[
-    SEM VALOR FISCAL \ HOMOLOGAÇÃO
-  ]))
+  box(width: 100%, height: 100%, align(center + horizon, rotate(if a4 { -35deg } else { -60deg }, align(center, text(fill: rgb(200, 0, 0, 45), weight: "bold", size: if narrow { 16pt } else if a4 { 40pt } else { 22pt })[SEM VALOR FISCAL \ HOMOLOGAÇÃO]))))
 }
 
-// Manual §3.3: papel de no mínimo 56 mm e margens laterais de no mínimo 2 mm.
-#set page(width: if narrow { 58mm } else { 80mm }, height: auto, margin: (x: 3mm, y: 4mm), background: watermark)
-#set text(font: mono, size: if narrow { 6.5pt } else { 7.5pt }, lang: "pt", region: "br", hyphenate: false)
+// Manual §3.3: papel de no mínimo 56 mm, margens laterais de no mínimo 2 mm; o A4 também é aceito.
+#let paper = if a4 {
+  (paper: "a4", margin: (x: 25mm, y: 15mm))
+} else {
+  (width: if narrow { 58mm } else { 80mm }, height: auto, margin: (x: 3mm, y: 4mm))
+}
+#set page(..paper, background: watermark)
+#set text(font: mono, size: if narrow { 6.5pt } else if a4 { 9pt } else { 7.5pt }, lang: "pt", region: "br", hyphenate: false)
 #set par(leading: 0.35em, spacing: 0.4em, justify: false)
 #let rule = line(length: 100%, stroke: 0.5pt)
 #let contingency = align(center, text(weight: "bold")[EMITIDA EM CONTINGÊNCIA \ Pendente de autorização])
@@ -29,7 +35,8 @@
   let a = e.address
   if a != none [ \ #a.street, #shown(a.district), #shown(a.city) - #shown(a.state)]
   linebreak()
-  [Documento Auxiliar da Nota Fiscal de Consumidor Eletrônica]
+  // NT 2026.003 §3.1.1.
+  if simplified { text(weight: "bold")[DANFE Simplificado Tipo 2] } else [Documento Auxiliar da Nota Fiscal de Consumidor Eletrônica]
 })
 // Divisão VIII: contingência em destaque, abaixo do cabeçalho.
 #if data.offline { rule; contingency }
@@ -64,13 +71,24 @@
   ..data.payments.map(p => (p.method, align(right)[#p.amount])).flatten(),
   ..if data.change != none { ([Troco R\$], align(right)[#data.change]) } else { () },
 )
+// NT 2026.003 §3.1.4: divisão III-A, os tributos da Reforma Tributária.
+#let rf = data.reform
+#if simplified and (rf.cbs, rf.ibs, rf.selective).any(v => v != none) {
+  rule
+  table(
+    columns: (1fr, auto), stroke: none, inset: (x: 0pt, y: 1.2pt),
+    ..if rf.cbs != none { ([(+) CBS R\$], align(right, rf.cbs)) } else { () },
+    ..if rf.ibs != none { ([(+) IBS R\$], align(right, rf.ibs)) } else { () },
+    ..if rf.selective != none { ([(+) IS R\$], align(right, rf.selective)) } else { () },
+  )
+}
 #rule
 
 // Divisão IV.
 #align(center)[
   Consulte pela Chave de Acesso em \
   #shown(data.url_chave) \
-  #text(weight: "bold", size: if narrow { 6pt } else { 6.4pt }, data.access_key)
+  #text(weight: "bold", size: if narrow { 6pt } else if a4 { 9pt } else { 6.4pt }, data.access_key)
 ]
 #rule
 
@@ -81,7 +99,7 @@
   if r != none and r.name != none [ \ #r.name]
   if r != none and r.address != none [ \ #r.address.street, #shown(r.address.district), #shown(r.address.city) - #shown(r.address.state)]
   v(3pt)
-  text(weight: "bold")[NFC-e nº #data.number_padded Série #data.series #data.issued_at]
+  text(weight: "bold")[#if simplified [NF-e] else [NFC-e] nº #data.number_padded Série #data.series #data.issued_at]
   if data.establishment_copy [ \ Via do Estabelecimento]
   if data.protocol != none [ \ Protocolo de autorização: #data.protocol]
 })
@@ -90,7 +108,7 @@
 
 // Divisão V (§3.4): no mínimo 25 mm, com a zona de silêncio na própria imagem.
 #v(3pt)
-#align(center, image("qrcode.svg", width: if narrow { 28mm } else { 32mm }))
+#align(center, image("qrcode.svg", width: if narrow { 28mm } else if a4 { 40mm } else { 32mm }))
 
 // Divisão VIII.
 #if data.homologation or data.fiscal_info != none {
