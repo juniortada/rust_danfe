@@ -1,4 +1,8 @@
-//! The Code 128 barcode of the access key (MOC 7.0 Anexo II §2), drawn as SVG.
+//! The Code 128 barcode of the access key, drawn as SVG.
+//!
+//! A numeric key is all set C (MOC 7.0 Anexo II §2). A key with an
+//! alphanumeric CNPJ starts in set C and switches to set A for the letters
+//! and back (NT Conjunta 2025.001 §6).
 
 use std::fmt::Write;
 
@@ -17,36 +21,54 @@ const CODE128: [&str; 107] = [
     "214121", "412121", "111143", "111341", "131141", "114113", "114311", "411113", "411311",
     "113141", "114131", "311141", "411131", "211412", "211214", "211232", "2331112",
 ];
-const START_B: usize = 104;
+const CODE_C: usize = 99;
+const CODE_A: usize = 101;
 const START_C: usize = 105;
 const STOP: usize = 106;
+/// The light margin on each side, in modules (Anexo II §2).
+const QUIET_ZONE: usize = 10;
 
-/// Code 128 symbol values: set C for an even-length all-digit text (the
-/// access key), set B otherwise; with check symbol and stop.
+/// How many digits start at `from`.
+fn digit_run(bytes: &[u8], from: usize) -> usize {
+    bytes[from..]
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count()
+}
+
+/// Symbol values of the key, with the check symbol and STOP; `None` for a
+/// character Code 128 sets A and C cannot carry.
 #[must_use]
 pub fn code128_symbols(text: &str) -> Option<Vec<usize>> {
-    let digits_only = !text.is_empty()
-        && text.len().is_multiple_of(2)
-        && text.bytes().all(|b| b.is_ascii_digit());
-    let mut symbols = Vec::new();
-    if digits_only {
-        symbols.push(START_C);
-        for pair in text.as_bytes().chunks(2) {
-            symbols.push(usize::from(pair[0] - b'0') * 10 + usize::from(pair[1] - b'0'));
-        }
-    } else {
-        symbols.push(START_B);
-        for byte in text.bytes() {
-            if !(32..=126).contains(&byte) {
-                return None;
+    let bytes = text.as_bytes();
+    if bytes.is_empty() || !bytes.iter().all(|byte| (b' '..=b'_').contains(byte)) {
+        return None;
+    }
+    let mut symbols = vec![START_C];
+    let mut in_c = true;
+    let mut index = 0;
+    while index < bytes.len() {
+        let run = digit_run(bytes, index);
+        if in_c && run >= 2 {
+            symbols
+                .push(usize::from(bytes[index] - b'0') * 10 + usize::from(bytes[index + 1] - b'0'));
+            index += 2;
+        } else if !in_c && run >= 2 && run.is_multiple_of(2) {
+            symbols.push(CODE_C);
+            in_c = true;
+        } else {
+            if in_c {
+                symbols.push(CODE_A);
+                in_c = false;
             }
-            symbols.push(usize::from(byte - 32));
+            symbols.push(usize::from(bytes[index] - b' '));
+            index += 1;
         }
     }
     let check = symbols
         .iter()
         .enumerate()
-        .map(|(index, symbol)| index.max(1) * symbol)
+        .map(|(position, symbol)| position.max(1) * symbol)
         .sum::<usize>()
         % 103;
     symbols.push(check);
@@ -54,10 +76,10 @@ pub fn code128_symbols(text: &str) -> Option<Vec<usize>> {
     Some(symbols)
 }
 
-/// Modules of a Code 128 barcode.
+/// Modules (`true` = bar) of the key, with the quiet zone on both sides.
 #[must_use]
 pub fn code128_modules(text: &str) -> Option<Vec<bool>> {
-    let mut modules = Vec::new();
+    let mut modules = vec![false; QUIET_ZONE];
     for symbol in code128_symbols(text)? {
         for (index, width) in CODE128[symbol].bytes().enumerate() {
             modules.extend(std::iter::repeat_n(
@@ -66,6 +88,7 @@ pub fn code128_modules(text: &str) -> Option<Vec<bool>> {
             ));
         }
     }
+    modules.extend(std::iter::repeat_n(false, QUIET_ZONE));
     Some(modules)
 }
 
@@ -101,19 +124,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uses_set_c_for_access_keys_and_checks_the_sum() {
+    fn a_numeric_key_is_all_set_c() {
         let key = "35260911444777000161550010000012341123456787";
         let symbols = code128_symbols(key).unwrap();
         assert_eq!(symbols[0], START_C);
         assert_eq!(symbols.len(), 1 + 22 + 2);
         assert_eq!(*symbols.last().unwrap(), STOP);
-        assert_eq!(code128_modules(key).unwrap().len(), 11 * 24 + 13);
+        assert_eq!(
+            code128_modules(key).unwrap().len(),
+            2 * QUIET_ZONE + 11 * 24 + 13
+        );
     }
 
     #[test]
-    fn draws_the_modules_as_svg() {
-        let svg = String::from_utf8(svg(&code128_modules("AB-1").unwrap(), 40)).unwrap();
-        assert!(svg.starts_with("<svg"));
+    fn follows_the_example_of_the_nt_for_letters() {
+        // NT Conjunta 2025.001 §6: 5225AB83 → START C, 52, 25, CODE A, 'A', 'B', CODE C, 83, DV 30.
+        assert_eq!(
+            code128_symbols("5225AB83").unwrap(),
+            vec![START_C, 52, 25, CODE_A, 33, 34, CODE_C, 83, 30, STOP]
+        );
+    }
+
+    #[test]
+    fn an_odd_digit_run_after_letters_takes_one_digit_in_set_a() {
+        let symbols = code128_symbols("12A345").unwrap();
+        assert_eq!(&symbols[..6], &[START_C, 12, CODE_A, 33, 19, CODE_C]);
+        assert_eq!(symbols[6], 45);
+    }
+
+    #[test]
+    fn refuses_what_sets_a_and_c_cannot_carry() {
         assert!(code128_symbols("ação").is_none());
+        assert!(code128_symbols("").is_none());
+        assert!(
+            String::from_utf8(svg(&code128_modules("12AB").unwrap(), 40))
+                .unwrap()
+                .starts_with("<svg")
+        );
     }
 }
